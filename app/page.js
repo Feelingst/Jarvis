@@ -9,8 +9,38 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
   const [speaking, setSpeaking] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [lang, setLang] = useState("es-ES");
   const bottomRef = useRef(null);
   const audioRef = useRef(null);
+  const recognitionRef = useRef(null);
+
+  function startListening() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Tu navegador no soporta dictado por voz. Prueba con Chrome o Safari actualizado.");
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = lang;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setListening(true);
+    recognition.onend = () => setListening(false);
+    recognition.onerror = () => setListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setInput((prev) => (prev ? prev + " " + transcript : transcript));
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }
+
+  function stopListening() {
+    recognitionRef.current?.stop();
+  }
 
   async function speak(text) {
     if (!voiceOn || !text) return;
@@ -81,6 +111,26 @@ export default function Home() {
             {loading ? "Pensando..." : speaking ? "Hablando..." : "Listo"}
           </p>
         </div>
+        <div style={{ display: "flex", gap: 4, marginRight: 4 }}>
+          {[
+            { code: "es-ES", label: "ES" },
+            { code: "fr-FR", label: "FR" },
+            { code: "en-US", label: "EN" },
+          ].map((l) => (
+            <button
+              key={l.code}
+              onClick={() => setLang(l.code)}
+              style={{
+                fontSize: 11, padding: "4px 8px", borderRadius: 8,
+                border: lang === l.code ? "1px solid #3a7bd5" : "1px solid #333",
+                background: lang === l.code ? "rgba(58,123,213,0.2)" : "transparent",
+                color: "#fff",
+              }}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => setVoiceOn(!voiceOn)}
           style={{
@@ -119,6 +169,17 @@ export default function Home() {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: "1rem" }}>
+        <button
+          onClick={listening ? stopListening : startListening}
+          style={{
+            width: 44, height: 44, borderRadius: 10, border: "none", flexShrink: 0,
+            background: listening ? "#d64545" : "#1c1c1e",
+            color: "#fff", fontSize: 18,
+          }}
+          aria-label={listening ? "Detener dictado" : "Hablar a Jarvis"}
+        >
+          {listening ? "⏹️" : "🎤"}
+        </button>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
