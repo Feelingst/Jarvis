@@ -7,7 +7,34 @@ export default function Home() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [speaking, setSpeaking] = useState(false);
   const bottomRef = useRef(null);
+  const audioRef = useRef(null);
+
+  async function speak(text) {
+    if (!voiceOn || !text) return;
+    try {
+      setSpeaking(true);
+      const res = await fetch("/api/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) {
+        setSpeaking(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play();
+      }
+    } catch (e) {
+      setSpeaking(false);
+    }
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -28,7 +55,9 @@ export default function Home() {
         body: JSON.stringify({ messages: newMessages }),
       });
       const data = await res.json();
-      setMessages([...newMessages, { role: "assistant", content: data.reply || "(sin respuesta)" }]);
+      const reply = data.reply || "(sin respuesta)";
+      setMessages([...newMessages, { role: "assistant", content: reply }]);
+      speak(reply);
     } catch (e) {
       setMessages([...newMessages, { role: "assistant", content: "Error al conectar con Jarvis." }]);
     } finally {
@@ -46,11 +75,30 @@ export default function Home() {
         }}>
           🎙️
         </div>
-        <div>
+        <div style={{ flex: 1 }}>
           <p style={{ margin: 0, fontWeight: 500 }}>Jarvis</p>
-          <p style={{ margin: 0, fontSize: 12, color: "#8a8a8a" }}>{loading ? "Pensando..." : "Listo"}</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#8a8a8a" }}>
+            {loading ? "Pensando..." : speaking ? "Hablando..." : "Listo"}
+          </p>
         </div>
+        <button
+          onClick={() => setVoiceOn(!voiceOn)}
+          style={{
+            width: 36, height: 36, borderRadius: "50%", border: "1px solid #333",
+            background: voiceOn ? "#3a7bd5" : "#1c1c1e", color: "#fff", fontSize: 16,
+          }}
+          aria-label={voiceOn ? "Desactivar voz" : "Activar voz"}
+        >
+          {voiceOn ? "🔊" : "🔇"}
+        </button>
       </div>
+      <audio
+        ref={audioRef}
+        onEnded={() => setSpeaking(false)}
+        onError={() => setSpeaking(false)}
+        style={{ display: "none" }}
+      />
+
 
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
         {messages.map((m, i) => (
