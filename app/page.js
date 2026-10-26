@@ -13,6 +13,7 @@ export default function Home() {
   const [lang, setLang] = useState("es-ES");
   const bottomRef = useRef(null);
   const audioRef = useRef(null);
+  const speakRunRef = useRef(0);
   const recognitionRef = useRef(null);
 
   function startListening() {
@@ -42,27 +43,87 @@ export default function Home() {
     recognitionRef.current?.stop();
   }
 
-  async function speak(text) {
-    if (!voiceOn || !text) return;
+  // Trocea la respuesta en frases para empezar a hablar antes
+  // (la voz local en CPU es lenta con textos largos).
+  function splitSentences(text) {
+    const clean = text
+      .replace(/[*_`#>]+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const parts = clean.match(/[^.!?¡¿\n]+[.!?]*\s*/g) || [clean];
+    const out = [];
+    let buf = "";
+    for (const p of parts) {
+      buf += p;
+      if (buf.length >= 40) {
+        out.push(buf.trim());
+        buf = "";
+      }
+    }
+    if (buf.trim()) out.push(buf.trim());
+    return out;
+  }
+
+  async function fetchAudio(text) {
     try {
-      setSpeaking(true);
       const res = await fetch("/api/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      if (!res.ok) {
-        setSpeaking(false);
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.play();
-      }
+      if (!res.ok) return null;
+      return URL.createObjectURL(await res.blob());
     } catch (e) {
-      setSpeaking(false);
+      return null;
+    }
+  }
+
+  function playUrl(url) {
+    return new Promise((resolve) => {
+      const audio = audioRef.current;
+      if (!audio) return resolve();
+      const done = () => {
+        audio.onended = null;
+        audio.onerror = null;
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onended = done;
+      audio.onerror = done;
+      audio.src = url;
+      audio.play().catch(done);
+    });
+  }
+
+  function stopSpeaking() {
+    speakRunRef.current++;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.dispatchEvent(new Event("ended"));
+    }
+    setSpeaking(false);
+  }
+
+  async function speak(text) {
+    if (!voiceOn || !text) return;
+    const runId = ++speakRunRef.current;
+    const parts = splitSentences(text);
+    if (!parts.length) return;
+    setSpeaking(true);
+    try {
+      let next = fetchAudio(parts[0]);
+      for (let i = 0; i < parts.length; i++) {
+        const current = next;
+        // Genera la frase siguiente mientras suena la actual
+        if (i + 1 < parts.length) next = fetchAudio(parts[i + 1]);
+        const url = await current;
+        if (speakRunRef.current !== runId) return;
+        if (url) await playUrl(url);
+        if (speakRunRef.current !== runId) return;
+      }
+    } finally {
+      if (speakRunRef.current === runId) setSpeaking(false);
     }
   }
 
@@ -73,6 +134,7 @@ export default function Home() {
   async function sendMessage() {
     const text = input.trim();
     if (!text || loading) return;
+    stopSpeaking();
     const newMessages = [...messages, { role: "user", content: text }];
     setMessages(newMessages);
     setInput("");
@@ -132,7 +194,10 @@ export default function Home() {
           ))}
         </div>
         <button
-          onClick={() => setVoiceOn(!voiceOn)}
+          onClick={() => {
+            if (speaking) stopSpeaking();
+            setVoiceOn(!voiceOn);
+          }}
           style={{
             width: 36, height: 36, borderRadius: "50%", border: "1px solid #333",
             background: voiceOn ? "#3a7bd5" : "#1c1c1e", color: "#fff", fontSize: 16,
@@ -142,12 +207,7 @@ export default function Home() {
           {voiceOn ? "🔊" : "🔇"}
         </button>
       </div>
-      <audio
-        ref={audioRef}
-        onEnded={() => setSpeaking(false)}
-        onError={() => setSpeaking(false)}
-        style={{ display: "none" }}
-      />
+      <audio ref={audioRef} style={{ display: "none" }} />
 
 
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
